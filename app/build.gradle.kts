@@ -17,6 +17,12 @@ android {
         versionCode     = 1
         versionName     = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        
+        // Force ARM64 so that x86_64 emulators (API 30+) use their built-in ARM translation (Houdini).
+        // This is required because MediaPipe Tasks Vision does not ship with x86_64 native libraries.
+        ndk {
+            abiFilters.add("arm64-v8a")
+        }
     }
 
     buildTypes {

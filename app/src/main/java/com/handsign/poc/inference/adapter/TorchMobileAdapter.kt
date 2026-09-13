@@ -41,6 +41,14 @@ class TorchMobileAdapter(
     }
 
     override fun recognize(imageProxy: ImageProxy): RecognitionResult? {
+        var imgWidth = imageProxy.width
+        var imgHeight = imageProxy.height
+        val rotationDegrees = imageProxy.imageInfo.rotationDegrees
+        if (rotationDegrees % 180 != 0) {
+            imgWidth = imageProxy.height
+            imgHeight = imageProxy.width
+        }
+
         handLandmarkerHelper.detectAsync(imageProxy)
         val result    = lastResult ?: return null
         val landmarks = result.toNormalizedLandmarks()
@@ -61,7 +69,9 @@ class TorchMobileAdapter(
         return RecognitionResult(
             letter      = config.labels[maxIdx],
             confidence  = confidence,
-            landmarks   = landmarks,
+            landmarks   = emptyList(),
+            imageWidth  = imgWidth,
+            imageHeight = imgHeight,
             inferenceMs = inferenceMs
         )
     }

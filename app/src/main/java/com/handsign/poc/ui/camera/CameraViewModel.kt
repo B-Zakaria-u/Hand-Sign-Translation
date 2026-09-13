@@ -45,7 +45,9 @@ class CameraViewModel @Inject constructor(
     private val _currentLetter  = MutableStateFlow("")
     private val _confidence     = MutableStateFlow(0f)
     private val _composedText   = MutableStateFlow("")
-    private val _landmarks      = MutableStateFlow<List<NormalizedLandmark>>(emptyList())
+    private val _landmarks      = MutableStateFlow<List<List<NormalizedLandmark>>>(emptyList())
+    private val _imageWidth     = MutableStateFlow(640)
+    private val _imageHeight    = MutableStateFlow(480)
     private val _inferenceMs    = MutableStateFlow(0L)
     private val _modelName      = MutableStateFlow("—")
     private val _sessionSaved   = MutableStateFlow(false)
@@ -54,7 +56,9 @@ class CameraViewModel @Inject constructor(
     val currentLetter: StateFlow<String>                = _currentLetter.asStateFlow()
     val confidence:    StateFlow<Float>                 = _confidence.asStateFlow()
     val composedText:  StateFlow<String>                = _composedText.asStateFlow()
-    val landmarks:     StateFlow<List<NormalizedLandmark>> = _landmarks.asStateFlow()
+    val landmarks:     StateFlow<List<List<NormalizedLandmark>>> = _landmarks.asStateFlow()
+    val imageWidth:    StateFlow<Int>                   = _imageWidth.asStateFlow()
+    val imageHeight:   StateFlow<Int>                   = _imageHeight.asStateFlow()
     val inferenceMs:   StateFlow<Long>                  = _inferenceMs.asStateFlow()
     val modelName:     StateFlow<String>                = _modelName.asStateFlow()
     val sessionSaved:  StateFlow<Boolean>               = _sessionSaved.asStateFlow()
@@ -75,28 +79,26 @@ class CameraViewModel @Inject constructor(
             _uiState.value = CameraUiState.Loading
             try {
                 val meta = modelRepository.getActiveModel()
-                if (meta == null) {
-                    // Fall back to bundled model
-                    val bundled = runCatching { modelLoader.loadBundled() }.getOrNull()
-                    if (bundled == null) {
-                        _uiState.value = CameraUiState.NoModel
-                        _modelName.value = "No model loaded"
-                        return@launch
-                    }
-                    val (file, config) = bundled
-                    val recognizer = modelAdapterFactory.create(config, file)
-                    withContext(Dispatchers.Default) { recognizer.initialize() }
-                    swapRecognizer(recognizer)
-                    _modelName.value = config.name
+                val metaFile = meta?.let { java.io.File(it.filePath) }
+
+                val (file, config) = if (meta != null && metaFile != null && metaFile.exists() && com.handsign.poc.inference.ModelValidator.validate(metaFile).isSuccess) {
+                    Pair(metaFile, modelRepository.readConfig(meta))
                 } else {
-                    val config = modelRepository.readConfig(meta)
-                    val recognizer = modelAdapterFactory.create(config, java.io.File(meta.filePath))
-                    withContext(Dispatchers.Default) { recognizer.initialize() }
-                    swapRecognizer(recognizer)
-                    _modelName.value = config.name
+                    if (meta != null) {
+                        runCatching { modelRepository.deleteModel(meta.id) }
+                    }
+                    val bundled = modelLoader.loadBundled()
+                    runCatching { modelRepository.saveModel(bundled.first, bundled.second) }
+                    bundled
                 }
+
+                val recognizer = modelAdapterFactory.create(config, file)
+                withContext(Dispatchers.Default) { recognizer.initialize() }
+                swapRecognizer(recognizer)
+                _modelName.value = config.name
                 _uiState.value = CameraUiState.NoHand
             } catch (e: Exception) {
+                android.util.Log.e("CameraViewModel", "Error in loadActiveModel", e)
                 _uiState.value = CameraUiState.Error(e.message ?: "Failed to load model")
             }
         }
@@ -114,7 +116,7 @@ class CameraViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.Default) {
             try {
                 val result = recognizer.recognize(imageProxy)
-                if (result == null) {
+                if (result == null || result.landmarks.isNullOrEmpty()) {
                     _uiState.value = CameraUiState.NoHand
                     _landmarks.value = emptyList()
                     return@launch
@@ -122,19 +124,25 @@ class CameraViewModel @Inject constructor(
                 _uiState.value  = CameraUiState.Inferring
                 _confidence.value = result.confidence
                 _inferenceMs.value = result.inferenceMs
-                result.landmarks?.let { _landmarks.value = it }
+                _landmarks.value = result.landmarks
+                _imageWidth.value = result.imageWidth
+                _imageHeight.value = result.imageHeight
 
-                val committed = debouncer.submit(result.letter)
-                if (committed != null) {
-                    _currentLetter.value = committed
-                    val char = if (committed == "SPACE") " " else committed
-                    _composedText.update { it + char }
-                    gestureLogs += GestureLogEntity(
-                        sessionId    = activeSessionId,
-                        letter       = committed,
-                        confidence   = result.confidence,
-                        wasCommitted = 1
-                    )
+                if (result.letter.isNotEmpty() && result.letter != "—") {
+                    val committed = debouncer.submit(result.letter)
+                    if (committed != null) {
+                        _currentLetter.value = committed
+                        val char = if (committed == "SPACE") " " else committed
+                        _composedText.update { it + char }
+                        gestureLogs += GestureLogEntity(
+                            sessionId    = activeSessionId,
+                            letter       = committed,
+                            confidence   = result.confidence,
+                            wasCommitted = 1
+                        )
+                    }
+                } else {
+                    debouncer.reset()
                 }
             } catch (e: Exception) {
                 _uiState.value = CameraUiState.Error(e.message ?: "Inference error")

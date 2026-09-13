@@ -30,9 +30,15 @@ class ModelLoader @Inject constructor(
 
     suspend fun loadBundled(): Pair<File, ModelConfig> = withContext(Dispatchers.IO) {
         val taskDest = File(modelsDir, "bundled_gesture_recognizer.task")
-        val assetsList = context.assets.list("") ?: emptyArray()
-        if ("gesture_recognizer.task" in assetsList) {
-            if (!taskDest.exists() || taskDest.length() < 100) {
+        val hasTaskAsset = try {
+            context.assets.open("gesture_recognizer.task").close()
+            true
+        } catch (_: Exception) {
+            false
+        }
+
+        if (hasTaskAsset) {
+            if (!taskDest.exists() || taskDest.length() < 1000 || ModelValidator.validate(taskDest).isFailure) {
                 context.assets.open("gesture_recognizer.task").use { input ->
                     taskDest.outputStream().use { output -> input.copyTo(output) }
                 }
@@ -63,21 +69,59 @@ class ModelLoader @Inject constructor(
 
     suspend fun loadFromUri(uri: Uri, configJson: String? = null): Pair<File, ModelConfig> =
         withContext(Dispatchers.IO) {
-            val mimeType = context.contentResolver.getType(uri) ?: ""
-            val ext = when {
-                mimeType.contains("onnx")    -> "onnx"
-                mimeType.contains("pytorch") -> "ptl"
-                else                         -> "tflite"
-            }
+            val ext = getFileExtension(uri)
             val dest = File(modelsDir, "import_${System.currentTimeMillis()}.$ext")
             context.contentResolver.openInputStream(uri)!!.use { it.copyTo(dest.outputStream()) }
 
             ModelValidator.validate(dest).getOrThrow()
 
+            val targetFile = if (ext == "keras" || ext == "h5") {
+                convertKerasOnDevice(dest)
+            } else {
+                dest
+            }
+
             val config = if (configJson != null) parseConfig(configJson)
-                         else inferConfig(dest)
-            Pair(dest, config)
+                         else inferConfig(targetFile)
+            Pair(targetFile, config)
         }
+
+    private fun getFileExtension(uri: Uri): String {
+        val fileName = context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            if (cursor.moveToFirst() && nameIndex != -1) cursor.getString(nameIndex) else null
+        } ?: uri.path ?: ""
+        return fileName.substringAfterLast('.', "tflite").lowercase()
+    }
+
+    private suspend fun convertKerasOnDevice(kerasFile: File): File = withContext(Dispatchers.IO) {
+        val outputFile = File(modelsDir, "${kerasFile.nameWithoutExtension}_converted.tflite")
+        try {
+            val pythonClass = Class.forName("com.chaquo.python.Python")
+            val isStartedMethod = pythonClass.getMethod("isStarted")
+            val getInstanceMethod = pythonClass.getMethod("getInstance")
+            if (!(isStartedMethod.invoke(null) as Boolean)) {
+                val platformClass = Class.forName("com.chaquo.python.android.AndroidPlatform")
+                val platformConst = platformClass.getConstructor(Context::class.java).newInstance(context)
+                pythonClass.getMethod("start", Class.forName("com.chaquo.python.PythonPlatform")).invoke(null, platformConst)
+            }
+            val pythonObj = getInstanceMethod.invoke(null)
+            val getModuleMethod = pythonClass.getMethod("getModule", String::class.java)
+            val moduleObj = getModuleMethod.invoke(pythonObj, "keras_converter")
+            val callAttrMethod = moduleObj.javaClass.getMethod("callAttr", String::class.java, Array<Any>::class.java)
+            callAttrMethod.invoke(moduleObj, "convert_keras_to_tflite", arrayOf<Any>(kerasFile.absolutePath, outputFile.absolutePath))
+
+            if (outputFile.exists() && outputFile.length() > 32) {
+                return@withContext outputFile
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("ModelLoader", "On-device Python conversion unavailable: ${e.message}")
+        }
+
+        throw IllegalArgumentException(
+            "To load .${kerasFile.extension} files on-device, please convert them to .tflite using tf.lite.TFLiteConverter in Python before importing."
+        )
+    }
 
     // ── GitHub URL ─────────────────────────────────────────────────────────────
 
@@ -121,6 +165,12 @@ class ModelLoader @Inject constructor(
 
         ModelValidator.validate(dest).getOrThrow()
 
+        val targetFile = if (ext == "keras" || ext == "h5") {
+            convertKerasOnDevice(dest)
+        } else {
+            dest
+        }
+
         // Integrity check
         if (expectedSha256 != null) {
             require(ModelValidator.verifySha256(dest, expectedSha256)) {
@@ -136,8 +186,8 @@ class ModelLoader @Inject constructor(
         } catch (_: Exception) { null }
 
         val config = if (configJson != null) parseConfig(configJson)
-                     else inferConfig(dest)
-        Pair(dest, config)
+                     else inferConfig(targetFile)
+        Pair(targetFile, config)
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────
@@ -146,11 +196,12 @@ class ModelLoader @Inject constructor(
 
     private fun inferConfig(file: File): ModelConfig {
         val format = when (file.extension.lowercase()) {
-            "tflite" -> ModelFormat.TFLITE_LANDMARK
-            "task"   -> ModelFormat.MEDIAPIPE_TASK
-            "onnx"   -> ModelFormat.ONNX
-            "ptl"    -> ModelFormat.TORCH_MOBILE
-            else     -> ModelFormat.TFLITE_LANDMARK
+            "tflite"      -> ModelFormat.TFLITE_LANDMARK
+            "task"        -> ModelFormat.MEDIAPIPE_TASK
+            "onnx"        -> ModelFormat.ONNX
+            "ptl"         -> ModelFormat.TORCH_MOBILE
+            "keras", "h5" -> ModelFormat.TFLITE_LANDMARK
+            else          -> ModelFormat.TFLITE_LANDMARK
         }
         return ModelConfig(
             name   = file.nameWithoutExtension,

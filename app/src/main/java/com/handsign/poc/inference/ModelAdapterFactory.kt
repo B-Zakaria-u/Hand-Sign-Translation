@@ -21,7 +21,8 @@ class ModelAdapterFactory @Inject constructor(
 ) {
     fun create(config: ModelConfig, modelFile: File): GestureRecognizer =
         when (config.format) {
-            ModelFormat.TFLITE_LANDMARK  -> TFLiteLandmarkAdapter(context, config, modelFile)
+            ModelFormat.TFLITE_LANDMARK,
+            ModelFormat.KERAS            -> TFLiteLandmarkAdapter(context, config, modelFile)
             ModelFormat.TFLITE_PIXEL     -> TFLitePixelAdapter(context, config, modelFile)
             ModelFormat.MEDIAPIPE_TASK   -> MediaPipeTaskAdapter(context, config, modelFile)
             ModelFormat.ONNX             -> OnnxAdapter(context, config, modelFile)

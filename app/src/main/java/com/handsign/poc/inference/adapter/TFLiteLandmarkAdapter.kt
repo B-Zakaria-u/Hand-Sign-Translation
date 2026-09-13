@@ -57,6 +57,14 @@ class TFLiteLandmarkAdapter(
     }
 
     override fun recognize(imageProxy: ImageProxy): RecognitionResult? {
+        var imgWidth = imageProxy.width
+        var imgHeight = imageProxy.height
+        val rotationDegrees = imageProxy.imageInfo.rotationDegrees
+        if (rotationDegrees % 180 != 0) {
+            imgWidth = imageProxy.height
+            imgHeight = imageProxy.width
+        }
+
         // Send frame to MediaPipe asynchronously, then close the proxy
         handLandmarkerHelper.detectAsync(imageProxy)
 
@@ -83,7 +91,9 @@ class TFLiteLandmarkAdapter(
         return RecognitionResult(
             letter      = config.labels[maxIdx],
             confidence  = confidence,
-            landmarks   = landmarks,
+            landmarks   = listOf(landmarks),
+            imageWidth  = imgWidth,
+            imageHeight = imgHeight,
             inferenceMs = inferenceMs
         )
     }

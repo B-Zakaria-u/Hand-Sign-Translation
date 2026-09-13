@@ -17,6 +17,11 @@ class OverlayView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null
 ) : View(context, attrs) {
 
+    init {
+        // BlurMaskFilter requires software rendering on many Android versions/devices
+        setLayerType(LAYER_TYPE_SOFTWARE, null)
+    }
+
     /** The 20 MediaPipe hand connections (pairs of landmark indices) */
     private val CONNECTIONS = listOf(
         0 to 1, 1 to 2, 2 to 3, 3 to 4,        // Thumb
@@ -26,27 +31,39 @@ class OverlayView @JvmOverloads constructor(
         0 to 17, 17 to 18, 18 to 19, 19 to 20   // Pinky
     )
 
+    private val boneGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x9939FF14.toInt() // Translucent neon green
+        strokeWidth = 16f
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        maskFilter = android.graphics.BlurMaskFilter(15f, android.graphics.BlurMaskFilter.Blur.NORMAL)
+    }
+
     private val bonePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color       = 0xFF00E5FF.toInt()  // Cyan
-        strokeWidth = 6f
-        style       = Paint.Style.STROKE
+        color = 0xFF39FF14.toInt() // Solid neon green
+        strokeWidth = 5f
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
     }
-    private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFFFFFFFF.toInt()        // White dots
+
+    private val dotGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x9939FF14.toInt() // Translucent neon green
         style = Paint.Style.FILL
+        maskFilter = android.graphics.BlurMaskFilter(15f, android.graphics.BlurMaskFilter.Blur.NORMAL)
     }
-    private val wristPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF00E676.toInt()        // Green wrist
+
+    private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFFFFFFF.toInt() // Solid white core
         style = Paint.Style.FILL
     }
 
-    private var landmarks: List<NormalizedLandmark> = emptyList()
+    private var landmarks: List<List<NormalizedLandmark>> = emptyList()
     private var imageWidth  = 1
     private var imageHeight = 1
     private var isFrontCamera = true
 
     fun setResults(
-        landmarks: List<NormalizedLandmark>,
+        landmarks: List<List<NormalizedLandmark>>,
         imageWidth: Int,
         imageHeight: Int,
         isFrontCamera: Boolean = true
@@ -64,31 +81,54 @@ class OverlayView @JvmOverloads constructor(
     }
 
     override fun onDraw(canvas: Canvas) {
-        if (landmarks.size < 21) return
+        if (landmarks.isEmpty()) return
 
-        val scaleX = width.toFloat()  / imageWidth
-        val scaleY = height.toFloat() / imageHeight
+        val imageAspectRatio = imageWidth.toFloat() / imageHeight.toFloat()
+        val viewAspectRatio = width.toFloat() / height.toFloat()
+
+        var scale = 1f
+        var dx = 0f
+        var dy = 0f
+
+        if (imageAspectRatio > viewAspectRatio) {
+            scale = height.toFloat() / imageHeight
+            val scaledWidth = imageWidth * scale
+            dx = -(scaledWidth - width) / 2f
+        } else {
+            scale = width.toFloat() / imageWidth
+            val scaledHeight = imageHeight * scale
+            dy = -(scaledHeight - height) / 2f
+        }
 
         fun lmToScreen(lm: NormalizedLandmark): PointF {
-            val sx = lm.x * imageWidth * scaleX
+            val sx = lm.x * imageWidth * scale + dx
             // Mirror X for front camera
             val screenX = if (isFrontCamera) width - sx else sx
-            val screenY = lm.y * imageHeight * scaleY
+            val screenY = lm.y * imageHeight * scale + dy
             return PointF(screenX, screenY)
         }
 
-        // Draw connections
-        CONNECTIONS.forEach { (a, b) ->
-            val pa = lmToScreen(landmarks[a])
-            val pb = lmToScreen(landmarks[b])
-            canvas.drawLine(pa.x, pa.y, pb.x, pb.y, bonePaint)
-        }
+        landmarks.forEach { handLandmarks ->
+            if (handLandmarks.size < 21) return@forEach
 
-        // Draw dots
-        landmarks.forEachIndexed { i, lm ->
-            val p = lmToScreen(lm)
-            val paint = if (i == 0) wristPaint else dotPaint
-            canvas.drawCircle(p.x, p.y, if (i == 0) 14f else 9f, paint)
+            // Draw connections (bones)
+            CONNECTIONS.forEach { (a, b) ->
+                val pa = lmToScreen(handLandmarks[a])
+                val pb = lmToScreen(handLandmarks[b])
+                // Draw glow first
+                canvas.drawLine(pa.x, pa.y, pb.x, pb.y, boneGlowPaint)
+                // Draw solid core
+                canvas.drawLine(pa.x, pa.y, pb.x, pb.y, bonePaint)
+            }
+
+            // Draw joints (dots)
+            handLandmarks.forEach { lm ->
+                val p = lmToScreen(lm)
+                // Draw glow first
+                canvas.drawCircle(p.x, p.y, 18f, dotGlowPaint)
+                // Draw solid white core
+                canvas.drawCircle(p.x, p.y, 8f, dotPaint)
+            }
         }
     }
 }

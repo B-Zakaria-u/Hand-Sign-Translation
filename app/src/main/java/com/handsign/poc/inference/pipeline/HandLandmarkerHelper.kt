@@ -5,6 +5,7 @@ import android.os.SystemClock
 import androidx.camera.core.ImageProxy
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.vision.core.ImageProcessingOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
@@ -51,20 +52,26 @@ class HandLandmarkerHelper(
         }
     }
 
+    @Volatile private var isProcessing = false
+
     fun detectAsync(imageProxy: ImageProxy) {
         val lm = landmarker
-        if (lm == null) {
+        if (lm == null || isProcessing) {
             imageProxy.close()
             return
         }
+        isProcessing = true
         try {
             val bitmap = imageProxy.toBitmap()
             val mpImage = BitmapImageBuilder(bitmap).build()
+            
+            // imageProxy.toBitmap() returns an upright bitmap, so we don't pass rotationDegrees to MediaPipe
             lm.detectAsync(mpImage, SystemClock.uptimeMillis())
         } catch (e: Exception) {
             onError(e)
         } finally {
             imageProxy.close()
+            isProcessing = false
         }
     }
 

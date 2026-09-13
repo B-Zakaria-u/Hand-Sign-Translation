@@ -11,5 +11,7 @@ enum class ModelFormat {
     /** ONNX model via ONNX Runtime for Android */
     ONNX,
     /** PyTorch Mobile lite model (.ptl) */
-    TORCH_MOBILE
+    TORCH_MOBILE,
+    /** Keras model (.keras or .h5) converted to TFLite */
+    KERAS
 }

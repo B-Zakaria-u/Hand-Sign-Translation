@@ -44,4 +44,18 @@ class ModelValidatorTest {
         val result = ModelValidator.validate(file)
         assertTrue(result.isSuccess)
     }
+
+    @Test
+    fun validate_validTaskZipHeader_returnsSuccess() {
+        val file = File.createTempFile("gesture_recognizer", ".task").apply { deleteOnExit() }
+        val content = ByteArray(64)
+        content[0] = 0x50
+        content[1] = 0x4B
+        content[2] = 0x03
+        content[3] = 0x04
+        file.writeBytes(content)
+
+        val result = ModelValidator.validate(file)
+        assertTrue(result.isSuccess)
+    }
 }

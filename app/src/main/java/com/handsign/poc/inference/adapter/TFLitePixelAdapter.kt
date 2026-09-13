@@ -44,8 +44,14 @@ class TFLitePixelAdapter(
     }
 
     override fun recognize(imageProxy: ImageProxy): RecognitionResult? {
+        var imgWidth = imageProxy.width
+        var imgHeight = imageProxy.height
+
         val bitmap = try {
-            imageProxy.toBitmap()
+            val bmp = imageProxy.toBitmap()
+            imgWidth = bmp.width
+            imgHeight = bmp.height
+            bmp
         } finally {
             imageProxy.close()
         }
@@ -66,7 +72,9 @@ class TFLitePixelAdapter(
         return RecognitionResult(
             letter      = config.labels[maxIdx],
             confidence  = confidence,
-            landmarks   = null,      // pixel-based: no landmarks
+            landmarks   = emptyList(),      // pixel-based: no landmarks
+            imageWidth  = imgWidth,
+            imageHeight = imgHeight,
             inferenceMs = inferenceMs
         )
     }

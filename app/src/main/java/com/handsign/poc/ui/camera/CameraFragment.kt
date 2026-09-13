@@ -82,18 +82,33 @@ class CameraFragment : Fragment() {
     private fun bindCameraUseCases() {
         val provider = cameraProvider ?: return
 
-        val cameraSelector = if (useFrontCamera)
-            CameraSelector.DEFAULT_FRONT_CAMERA
-        else
-            CameraSelector.DEFAULT_BACK_CAMERA
+        val cameraSelector = when {
+            useFrontCamera && provider.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA) ->
+                CameraSelector.DEFAULT_FRONT_CAMERA
+            provider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA) -> {
+                useFrontCamera = false
+                CameraSelector.DEFAULT_BACK_CAMERA
+            }
+            provider.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA) -> {
+                useFrontCamera = true
+                CameraSelector.DEFAULT_FRONT_CAMERA
+            }
+            provider.availableCameraInfos.isNotEmpty() -> {
+                // Emulator generic camera: don't override useFrontCamera so the user can toggle mirroring manually!
+                CameraSelector.Builder()
+                    .addCameraFilter { cameraInfos -> listOf(cameraInfos.first()) }
+                    .build()
+            }
+            else -> {
+                Toast.makeText(requireContext(), "No available cameras found on this device.", Toast.LENGTH_LONG).show()
+                return
+            }
+        }
 
         val preview = Preview.Builder()
             .setTargetAspectRatio(AspectRatio.RATIO_4_3)
             .build()
             .also { it.surfaceProvider = binding.previewView.surfaceProvider }
-
-        var frameCount = 0
-        val frameInterval = 3
 
         val imageAnalysis = ImageAnalysis.Builder()
             .setTargetAspectRatio(AspectRatio.RATIO_4_3)
@@ -101,12 +116,7 @@ class CameraFragment : Fragment() {
             .build()
             .also { analysis ->
                 analysis.setAnalyzer(cameraExecutor) { imageProxy ->
-                    frameCount++
-                    if (frameCount % frameInterval == 0) {
-                        viewModel.onNewFrame(imageProxy)
-                    } else {
-                        imageProxy.close()
-                    }
+                    viewModel.onNewFrame(imageProxy)
                 }
             }
 
@@ -161,8 +171,8 @@ class CameraFragment : Fragment() {
                     viewModel.landmarks.collect { landmarks ->
                         binding.overlayView.setResults(
                             landmarks   = landmarks,
-                            imageWidth  = 640,
-                            imageHeight = 480,
+                            imageWidth  = viewModel.imageWidth.value,
+                            imageHeight = viewModel.imageHeight.value,
                             isFrontCamera = useFrontCamera
                         )
                     }

@@ -9,7 +9,9 @@ data class RecognitionResult(
     /** Confidence score in the range [0.0, 1.0] */
     val confidence: Float,
     /** Normalized hand landmarks from MediaPipe (null for pixel-based models) */
-    val landmarks: List<NormalizedLandmark>?,
+    val landmarks: List<List<NormalizedLandmark>>,
+    val imageWidth: Int,
+    val imageHeight: Int,
     /** Wall-clock time taken to run the inference, in milliseconds */
     val inferenceMs: Long
 )
