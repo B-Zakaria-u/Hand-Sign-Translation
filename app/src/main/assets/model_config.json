@@ -1,0 +1,17 @@
+{
+  "name": "MediaPipe Gesture Recognizer",
+  "format": "MEDIAPIPE_TASK",
+  "labels": [
+    "Thumb_Up",
+    "Thumb_Down",
+    "Victory",
+    "Pointing_Up",
+    "Open_Palm",
+    "Closed_Fist",
+    "ILoveYou"
+  ],
+  "confidenceThreshold": 0.50,
+  "stableFrames": 3,
+  "version": "1.0.0",
+  "sha256": null
+}

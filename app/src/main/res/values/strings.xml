@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">HandSign POC</string>
+    <string name="camera_permission_rationale">Camera access is required for live hand gesture detection.</string>
+    <string name="no_model_loaded">No model loaded</string>
+    <string name="firebase_not_configured">Firebase not configured. Add google-services.json to activate sync.</string>
+</resources>
